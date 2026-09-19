@@ -664,5 +664,5 @@ Built to help educational institutions move from **reactive placement preparatio
 
 ## ⭐ Vision
 
-> **Identify the gap early. Build the skills continuously. Enter placement season job-ready.**
+> **Identify the gap early. Build the skills continuously.Enter placement season job-ready.**
 #
