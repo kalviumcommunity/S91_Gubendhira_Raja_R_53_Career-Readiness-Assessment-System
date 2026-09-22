@@ -3,15 +3,40 @@ const User = require("../models/User");
 
 const router = express.Router();
 
-// WRITE - Create a new user
+// POST - Create a new user
 router.post("/", async (req, res) => {
     try {
-        const user = await User.create(req.body);
+        const { name, email, password, role } = req.body;
+
+        // Check required fields
+        if (!name || !email || !password) {
+            return res.status(400).json({
+                message: "Name, email and password are required"
+            });
+        }
+
+        // Check if email already exists
+        const existingUser = await User.findOne({ email });
+
+        if (existingUser) {
+            return res.status(409).json({
+                message: "Email already exists"
+            });
+        }
+
+        // Create user
+        const user = await User.create({
+            name,
+            email,
+            password,
+            role
+        });
 
         res.status(201).json({
             message: "User created successfully",
             user
         });
+
     } catch (error) {
         res.status(500).json({
             message: "Failed to create user",
@@ -20,15 +45,94 @@ router.post("/", async (req, res) => {
     }
 });
 
-// READ - Get all users
+// GET - Get all users
 router.get("/", async (req, res) => {
     try {
         const users = await User.find();
 
-        res.status(200).json(users);
+        res.status(200).json({
+            message: "Users fetched successfully",
+            count: users.length,
+            users
+        });
+
     } catch (error) {
         res.status(500).json({
-            message: "Failed to get users",
+            message: "Failed to fetch users",
+            error: error.message
+        });
+    }
+});
+
+// PUT - Update a user
+router.put("/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, email, role, isActive } = req.body;
+
+        const user = await User.findById(id);
+
+        // Check if user exists
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        // Update only the fields provided
+        if (name !== undefined) {
+            user.name = name;
+        }
+
+        if (email !== undefined) {
+            user.email = email;
+        }
+
+        if (role !== undefined) {
+            user.role = role;
+        }
+
+        if (isActive !== undefined) {
+            user.isActive = isActive;
+        }
+
+        const updatedUser = await user.save();
+
+        res.status(200).json({
+            message: "User updated successfully",
+            user: updatedUser
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to update user",
+            error: error.message
+        });
+    }
+});
+
+// DELETE - Delete a user
+router.delete("/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const user = await User.findById(id);
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        await User.findByIdAndDelete(id);
+
+        res.status(200).json({
+            message: "User deleted successfully"
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to delete user",
             error: error.message
         });
     }
