@@ -167,7 +167,7 @@ function App() {
               </button>
             </form>
 
-            <p className="form-footnote">Your password is encrypted before it is stored.</p>
+            <p className="form-footnote">Your password is securely hashed before it is stored.</p>
           </div>
         )}
         <footer className="form-footer"><span>© 2026 CRAS</span><span>CAREER READINESS, MADE CLEAR.</span></footer>
