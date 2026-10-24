@@ -424,40 +424,16 @@ Make sure you have installed:
 
 * Node.js
 * npm
-* Python 3.10+
 * Git
-* Supabase account
-* Gemini API key
+* MongoDB
 
 ---
 
 ## 1. Clone the Repository
 
 ```bash
-git clone https://github.com/<your-username>/<your-repository>.git
-
-cd <your-repository>
-```
-
----
-
-## 2. Frontend Setup
-
-```bash
-cd frontend
-
 npm install
-
 npm run dev
-```
-
-The frontend will start using the Vite development server.
-
----
-
-## 3. Backend Setup
-
-Open another terminal:
 
 ```bash
 cd backend
@@ -493,26 +469,20 @@ uvicorn main:app --reload
 
 # 🔐 Environment Variables
 
-Create a `.env` file in the backend:
+Create `backend/.env` with your MongoDB connection string and a long random JWT secret:
 
 ```env
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
-
-GEMINI_API_KEY=your_gemini_api_key
-
-DATABASE_URL=your_database_url
+MONGO_URI=mongodb://127.0.0.1:27017/career_readiness
+JWT_SECRET=replace_with_a_long_random_secret
+PORT=5000
 ```
 
-Create the required frontend environment variables:
+The Vite development server proxies `/api` requests to `http://localhost:5000`.
+Sign-up is available at `POST /api/users` with `name`, `username`, `email`, and `password`.
+Sign-in is available at `POST /api/users/login` with `username` and `password`.
+Both return a one-hour bearer token; send it in the `Authorization` header for protected user endpoints.
 
-```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-VITE_API_URL=http://localhost:8000
-```
-
-> ⚠️ Never commit `.env` files or API keys to GitHub.
+> Never commit `.env` files or secrets to GitHub.
 
 Add them to `.gitignore`:
 
