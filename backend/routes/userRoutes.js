@@ -1,21 +1,62 @@
+
 const express = require("express");
+const bcrypt = require("bcryptjs");
+const mongoose = require("mongoose");
 const User = require("../models/User");
 
 const router = express.Router();
 
+const allowedRoles = [
+    "student",
+    "faculty",
+    "placement_officer",
+    "admin"
+];
+
+// Remove password before sending a user in an API response
+const safeUser = (user) => {
+    const userObject = user.toObject();
+    delete userObject.password;
+    return userObject;
+};
+
 // POST - Create a new user
 router.post("/", async (req, res) => {
     try {
-        const { name, email, password, role } = req.body;
+        let { name, email, password, role } = req.body;
 
-        // Check required fields
-        if (!name || !email || !password) {
+        if (
+            typeof name !== "string" ||
+            !name.trim() ||
+            typeof email !== "string" ||
+            typeof password !== "string"
+        ) {
             return res.status(400).json({
                 message: "Name, email and password are required"
             });
         }
 
-        // Check if email already exists
+        name = name.trim();
+        email = email.trim().toLowerCase();
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({
+                message: "Please provide a valid email address"
+            });
+        }
+
+        if (password.length < 8) {
+            return res.status(400).json({
+                message: "Password must contain at least 8 characters"
+            });
+        }
+
+        if (role !== undefined && !allowedRoles.includes(role)) {
+            return res.status(400).json({
+                message: "Invalid user role"
+            });
+        }
+
         const existingUser = await User.findOne({ email });
 
         if (existingUser) {
@@ -24,23 +65,36 @@ router.post("/", async (req, res) => {
             });
         }
 
-        // Create user
+        const hashedPassword = await bcrypt.hash(password, 12);
+
         const user = await User.create({
             name,
             email,
-            password,
+            password: hashedPassword,
             role
         });
 
-        res.status(201).json({
+        return res.status(201).json({
             message: "User created successfully",
-            user
+            user: safeUser(user)
         });
 
     } catch (error) {
-        res.status(500).json({
-            message: "Failed to create user",
-            error: error.message
+        if (error.code === 11000) {
+            return res.status(409).json({
+                message: "Email already exists"
+            });
+        }
+
+        if (error.name === "ValidationError") {
+            return res.status(400).json({
+                message: "Invalid user data",
+                error: error.message
+            });
+        }
+
+        return res.status(500).json({
+            message: "Failed to create user"
         });
     }
 });
@@ -48,18 +102,48 @@ router.post("/", async (req, res) => {
 // GET - Get all users
 router.get("/", async (req, res) => {
     try {
-        const users = await User.find();
+        const users = await User.find().select("-password");
 
-        res.status(200).json({
+        return res.status(200).json({
             message: "Users fetched successfully",
             count: users.length,
             users
         });
 
     } catch (error) {
-        res.status(500).json({
-            message: "Failed to fetch users",
-            error: error.message
+        return res.status(500).json({
+            message: "Failed to fetch users"
+        });
+    }
+});
+
+// GET - Get one user by ID
+router.get("/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({
+                message: "Invalid user ID"
+            });
+        }
+
+        const user = await User.findById(id).select("-password");
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        return res.status(200).json({
+            message: "User fetched successfully",
+            user
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Failed to fetch user"
         });
     }
 });
@@ -68,45 +152,101 @@ router.get("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, email, role, isActive } = req.body;
+        const { name, email, password, role, isActive } = req.body;
+
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({
+                message: "Invalid user ID"
+            });
+        }
 
         const user = await User.findById(id);
 
-        // Check if user exists
         if (!user) {
             return res.status(404).json({
                 message: "User not found"
             });
         }
 
-        // Update only the fields provided
         if (name !== undefined) {
-            user.name = name;
+            if (typeof name !== "string" || !name.trim()) {
+                return res.status(400).json({
+                    message: "Name cannot be empty"
+                });
+            }
+
+            user.name = name.trim();
         }
 
         if (email !== undefined) {
-            user.email = email;
+            if (
+                typeof email !== "string" ||
+                !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+            ) {
+                return res.status(400).json({
+                    message: "Please provide a valid email address"
+                });
+            }
+
+            user.email = email.trim().toLowerCase();
+        }
+
+        if (password !== undefined) {
+            if (
+                typeof password !== "string" ||
+                password.length < 8
+            ) {
+                return res.status(400).json({
+                    message: "Password must contain at least 8 characters"
+                });
+            }
+
+            user.password = await bcrypt.hash(password, 12);
         }
 
         if (role !== undefined) {
+            if (!allowedRoles.includes(role)) {
+                return res.status(400).json({
+                    message: "Invalid user role"
+                });
+            }
+
             user.role = role;
         }
 
         if (isActive !== undefined) {
+            if (typeof isActive !== "boolean") {
+                return res.status(400).json({
+                    message: "isActive must be true or false"
+                });
+            }
+
             user.isActive = isActive;
         }
 
         const updatedUser = await user.save();
 
-        res.status(200).json({
+        return res.status(200).json({
             message: "User updated successfully",
-            user: updatedUser
+            user: safeUser(updatedUser)
         });
 
     } catch (error) {
-        res.status(500).json({
-            message: "Failed to update user",
-            error: error.message
+        if (error.code === 11000) {
+            return res.status(409).json({
+                message: "Email already exists"
+            });
+        }
+
+        if (error.name === "ValidationError") {
+            return res.status(400).json({
+                message: "Invalid user data",
+                error: error.message
+            });
+        }
+
+        return res.status(500).json({
+            message: "Failed to update user"
         });
     }
 });
@@ -116,7 +256,13 @@ router.delete("/:id", async (req, res) => {
     try {
         const { id } = req.params;
 
-        const user = await User.findById(id);
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({
+                message: "Invalid user ID"
+            });
+        }
+
+        const user = await User.findByIdAndDelete(id);
 
         if (!user) {
             return res.status(404).json({
@@ -124,16 +270,13 @@ router.delete("/:id", async (req, res) => {
             });
         }
 
-        await User.findByIdAndDelete(id);
-
-        res.status(200).json({
+        return res.status(200).json({
             message: "User deleted successfully"
         });
 
     } catch (error) {
-        res.status(500).json({
-            message: "Failed to delete user",
-            error: error.message
+        return res.status(500).json({
+            message: "Failed to delete user"
         });
     }
 });
