@@ -8,6 +8,10 @@ const questionRoutes = require("./routes/questionRoutes");
 
 dotenv.config();
 
+if (!process.env.JWT_SECRET) {
+    throw new Error("JWT_SECRET must be configured before starting the server");
+}
+
 const app = express();
 
 app.use(express.json());

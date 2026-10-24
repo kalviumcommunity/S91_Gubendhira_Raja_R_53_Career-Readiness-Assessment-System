@@ -1,17 +1,13 @@
 
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const User = require("../models/User");
+const { authenticateToken, requireAdmin } = require("../middleware/authMiddleware");
 
 const router = express.Router();
-
-const allowedRoles = [
-    "student",
-    "faculty",
-    "placement_officer",
-    "admin"
-];
+const allowedRoles = ["student", "faculty", "placement_officer", "admin"];
 
 // Remove password before sending a user in an API response
 const safeUser = (user) => {
@@ -23,21 +19,27 @@ const safeUser = (user) => {
 // POST - Create a new user
 router.post("/", async (req, res) => {
     try {
-        let { name, email, password, role } = req.body;
+        let { name, username, email, password } = req.body;
 
         if (
             typeof name !== "string" ||
             !name.trim() ||
+            typeof username !== "string" ||
             typeof email !== "string" ||
             typeof password !== "string"
         ) {
-            return res.status(400).json({
-                message: "Name, email and password are required"
-            });
+            return res.status(400).json({ message: "Name, username, email and password are required" });
         }
 
         name = name.trim();
+        username = username.trim().toLowerCase();
         email = email.trim().toLowerCase();
+
+        if (!/^[a-z0-9_]{3,30}$/.test(username)) {
+            return res.status(400).json({
+                message: "Username must be 3-30 characters and use only letters, numbers or underscores"
+            });
+        }
 
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             return res.status(400).json({
@@ -51,17 +53,11 @@ router.post("/", async (req, res) => {
             });
         }
 
-        if (role !== undefined && !allowedRoles.includes(role)) {
-            return res.status(400).json({
-                message: "Invalid user role"
-            });
-        }
-
-        const existingUser = await User.findOne({ email });
+        const existingUser = await User.findOne({ $or: [{ username }, { email }] });
 
         if (existingUser) {
             return res.status(409).json({
-                message: "Email already exists"
+                message: "Username or email already exists"
             });
         }
 
@@ -69,20 +65,26 @@ router.post("/", async (req, res) => {
 
         const user = await User.create({
             name,
+            username,
             email,
             password: hashedPassword,
-            role
+            role: "student"
         });
 
         return res.status(201).json({
             message: "User created successfully",
-            user: safeUser(user)
+            user: safeUser(user),
+            token: jwt.sign(
+                { sub: user.id, role: user.role },
+                process.env.JWT_SECRET,
+                { expiresIn: "1h" }
+            )
         });
 
     } catch (error) {
         if (error.code === 11000) {
             return res.status(409).json({
-                message: "Email already exists"
+                message: "Username or email already exists"
             });
         }
 
@@ -99,8 +101,53 @@ router.post("/", async (req, res) => {
     }
 });
 
+// POST - Authenticate a user by username and password
+router.post("/login", async (req, res) => {
+    try {
+        const { username, password } = req.body;
+
+        if (typeof username !== "string" || typeof password !== "string") {
+            return res.status(400).json({ message: "Username and password are required" });
+        }
+
+        const user = await User.findOne({ username: username.trim().toLowerCase() });
+        if (!user || !user.isActive || !(await bcrypt.compare(password, user.password))) {
+            return res.status(401).json({ message: "Invalid username or password" });
+        }
+
+        return res.status(200).json({
+            message: "Signed in successfully",
+            user: safeUser(user),
+            token: jwt.sign(
+                { sub: user.id, role: user.role },
+                process.env.JWT_SECRET,
+                { expiresIn: "1h" }
+            )
+        });
+    } catch (error) {
+        return res.status(500).json({ message: "Failed to sign in" });
+    }
+});
+
+// GET - Get the signed-in user's profile
+router.get("/me", authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.auth.sub).select("-password");
+
+        if (!user || !user.isActive) {
+            return res.status(401).json({ message: "User account is unavailable" });
+        }
+
+        return res.status(200).json({ user });
+    } catch (error) {
+        return res.status(500).json({ message: "Failed to fetch user profile" });
+    }
+});
+
+router.use(authenticateToken);
+
 // GET - Get all users
-router.get("/", async (req, res) => {
+router.get("/", requireAdmin, async (req, res) => {
     try {
         const users = await User.find().select("-password");
 
@@ -126,6 +173,10 @@ router.get("/:id", async (req, res) => {
             return res.status(400).json({
                 message: "Invalid user ID"
             });
+        }
+
+        if (req.auth.sub !== id && req.auth.role !== "admin") {
+            return res.status(403).json({ message: "You can only view your own profile" });
         }
 
         const user = await User.findById(id).select("-password");
@@ -166,6 +217,14 @@ router.put("/:id", async (req, res) => {
             return res.status(404).json({
                 message: "User not found"
             });
+        }
+
+        if (req.auth.sub !== id && req.auth.role !== "admin") {
+            return res.status(403).json({ message: "You can only update your own profile" });
+        }
+
+        if (req.auth.role !== "admin" && (role !== undefined || isActive !== undefined)) {
+            return res.status(403).json({ message: "Only administrators can change roles or account status" });
         }
 
         if (name !== undefined) {
@@ -252,7 +311,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // DELETE - Delete a user
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
 
