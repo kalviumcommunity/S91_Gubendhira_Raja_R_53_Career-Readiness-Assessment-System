@@ -3,6 +3,8 @@ const dotenv = require("dotenv");
 const connectDB = require("./config/db");
 
 const userRoutes = require("./routes/userRoutes");
+const assessmentRoutes = require("./routes/assessmentRoutes");
+const questionRoutes = require("./routes/questionRoutes");
 
 dotenv.config();
 
@@ -19,6 +21,8 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/users", userRoutes);
+app.use("/api/assessments", assessmentRoutes);
+app.use("/api/questions", questionRoutes);
 
 const PORT = process.env.PORT || 5000;
 
