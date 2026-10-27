@@ -5,11 +5,19 @@ const mongoose = require("mongoose");
 const Assessment = require("../models/Assessment");
 const Skill = require("../models/Skills");
 const User = require("../models/User");
+const {
+    authenticateToken,
+    requireRoles
+} = require("../middleware/authMiddleware");
 
 const router = express.Router();
+router.use(authenticateToken);
 
 // CREATE an assessment
-router.post("/", async (req, res) => {
+router.post(
+    "/",
+    requireRoles("admin", "faculty", "placement_officer"),
+    async (req, res) => {
     try {
         const {
             title,
