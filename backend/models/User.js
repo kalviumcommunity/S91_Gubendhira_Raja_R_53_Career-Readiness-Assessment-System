@@ -1,3 +1,4 @@
+
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
@@ -28,7 +29,21 @@ const userSchema = new mongoose.Schema(
 
         password: {
             type: String,
-            required: true
+            required: function () {
+                return this.authProvider !== "google";
+            }
+        },
+
+        authProvider: {
+            type: String,
+            enum: ["local", "google"],
+            default: "local"
+        },
+
+        googleId: {
+            type: String,
+            unique: true,
+            sparse: true
         },
 
         role: {
