@@ -4,9 +4,13 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const User = require("../models/User");
+const { OAuth2Client } = require("google-auth-library");
 const { authenticateToken, requireAdmin } = require("../middleware/authMiddleware");
 
 const router = express.Router();
+const googleClient = new OAuth2Client(
+    process.env.GOOGLE_CLIENT_ID
+);
 const allowedRoles = ["student", "faculty", "placement_officer", "admin"];
 
 // Remove password before sending a user in an API response
@@ -141,6 +145,121 @@ router.get("/me", authenticateToken, async (req, res) => {
         return res.status(200).json({ user });
     } catch (error) {
         return res.status(500).json({ message: "Failed to fetch user profile" });
+    }
+});
+
+
+router.post("/google", async (req, res) => {
+    try {
+        const { credential } = req.body;
+
+        if (typeof credential !== "string" || !credential) {
+            return res.status(400).json({
+                message: "Google credential is required"
+            });
+        }
+
+        if (!process.env.GOOGLE_CLIENT_ID) {
+            return res.status(500).json({
+                message: "Google authentication is not configured"
+            });
+        }
+
+        // Verify the ID token with Google.
+        const ticket = await googleClient.verifyIdToken({
+            idToken: credential,
+            audience: process.env.GOOGLE_CLIENT_ID
+        });
+
+        const payload = ticket.getPayload();
+
+        if (
+            !payload ||
+            !payload.sub ||
+            !payload.email ||
+            payload.email_verified !== true
+        ) {
+            return res.status(401).json({
+                message: "Google account could not be verified"
+            });
+        }
+
+        const googleId = payload.sub;
+        const email = payload.email.trim().toLowerCase();
+
+        // Find an account already linked to this Google identity.
+        let user = await User.findOne({ googleId });
+
+        if (user) {
+            if (!user.isActive) {
+                return res.status(403).json({
+                    message: "User account is unavailable"
+                });
+            }
+        } else {
+            // Do not silently link an existing local account by email.
+            const existingUser = await User.findOne({ email });
+
+            if (existingUser) {
+                return res.status(409).json({
+                    message:
+                        "An account with this email already exists. Sign in using your existing login method."
+                });
+            }
+
+            // Generate a unique username from the email prefix.
+            const prefix = (email.split("@")[0]
+                .toLowerCase()
+                .replace(/[^a-z0-9_]/g, "_")
+                .replace(/_+/g, "_")
+                .replace(/^_+|_+$/g, "")
+                .slice(0, 24) || "student")
+                .padEnd(3, "_");
+
+            let username = prefix;
+            let counter = 1;
+
+            while (await User.exists({ username })) {
+                const suffix = `_${counter++}`;
+                username = prefix.slice(0, 30 - suffix.length) + suffix;
+            }
+
+            user = await User.create({
+                name: payload.name?.trim() || username,
+                username,
+                email,
+                googleId,
+                authProvider: "google",
+                role: "student",
+                isActive: true
+            });
+        }
+
+        // Issue your application's JWT, not Google's ID token.
+        const token = jwt.sign(
+            { sub: user.id, role: user.role },
+            process.env.JWT_SECRET,
+            { expiresIn: "1h" }
+        );
+
+        return res.status(200).json({
+            message: "Google sign-in successful",
+            user: safeUser(user),
+            token
+        });
+    } catch (error) {
+        if (error.code === 11000) {
+            return res.status(409).json({
+                message: "An account with these details already exists"
+            });
+        }
+
+        // Avoid returning internal error details to the client.
+        console.error("Google sign-in failed:", error.message);
+
+        return res.status(401).json({
+            message: "Google sign-in failed"
+        });
     }
 });
 
