@@ -1,73 +1,221 @@
+
 import { useEffect, useState } from 'react'
-import { ArrowRight, Check, LogOut, ShieldCheck } from 'lucide-react'
+import {
+  ArrowRight,
+  Check,
+  LogOut,
+  ShieldCheck,
+  Upload,
+  FileText,
+  X
+} from 'lucide-react'
 import './App.css'
 
 const tokenKey = 'cras-auth-token'
 const userKey = 'cras-auth-user'
+const MAX_FILE_SIZE = 5 * 1024 * 1024
 
 function App() {
   const [mode, setMode] = useState('login')
-  const [form, setForm] = useState({ name: '', username: '', email: '', password: '' })
+  const [form, setForm] = useState({
+    name: '',
+    username: '',
+    email: '',
+    password: ''
+  })
+
   const [session, setSession] = useState(() => {
     const token = sessionStorage.getItem(tokenKey)
     const savedUser = sessionStorage.getItem(userKey)
-    return token && savedUser ? { token, user: JSON.parse(savedUser) } : null
+
+    return token && savedUser
+      ? { token, user: JSON.parse(savedUser) }
+      : null
   })
+
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+
+  // Resume upload states
+  const [resume, setResume] = useState(null)
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState('')
+  const [uploadSuccess, setUploadSuccess] = useState(false)
 
   useEffect(() => {
     if (!session?.token) return
 
     fetch('/api/users/me', {
-      headers: { Authorization: `Bearer ${session.token}` },
-    }).then(async (response) => {
-      if (!response.ok) throw new Error('Your session expired. Please sign in again.')
-      const data = await response.json()
-      sessionStorage.setItem(userKey, JSON.stringify(data.user))
-      setSession((current) => current ? { ...current, user: data.user } : current)
-    }).catch((error) => {
-      sessionStorage.removeItem(tokenKey)
-      sessionStorage.removeItem(userKey)
-      setSession(null)
-      setMessage(error.message)
+      headers: {
+        Authorization: `Bearer ${session.token}`
+      }
     })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('Your session expired. Please sign in again.')
+        }
+
+        const data = await response.json()
+
+        sessionStorage.setItem(userKey, JSON.stringify(data.user))
+
+        setSession((current) =>
+          current ? { ...current, user: data.user } : current
+        )
+      })
+      .catch((error) => {
+        sessionStorage.removeItem(tokenKey)
+        sessionStorage.removeItem(userKey)
+        setSession(null)
+        setMessage(error.message)
+      })
   }, [session?.token])
 
   const updateField = (event) => {
-    setForm((current) => ({ ...current, [event.target.name]: event.target.value }))
+    setForm((current) => ({
+      ...current,
+      [event.target.name]: event.target.value
+    }))
   }
 
+  // Login and registration
   const handleSubmit = async (event) => {
     event.preventDefault()
     setBusy(true)
     setMessage('')
 
     try {
-      const endpoint = mode === 'login' ? '/api/users/login' : '/api/users'
+      const endpoint =
+        mode === 'login' ? '/api/users/login' : '/api/users'
+
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(form)
       })
+
       const data = await response.json()
-      if (!response.ok) throw new Error(data.message || 'Authentication failed')
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Authentication failed')
+      }
 
       sessionStorage.setItem(tokenKey, data.token)
       sessionStorage.setItem(userKey, JSON.stringify(data.user))
-      setSession({ token: data.token, user: data.user })
+
+      setSession({
+        token: data.token,
+        user: data.user
+      })
     } catch (error) {
-      setMessage(error.message || 'Unable to reach the server. Please try again.')
+      setMessage(
+        error.message || 'Unable to reach the server. Please try again.'
+      )
     } finally {
       setBusy(false)
+    }
+  }
+
+  // Select and validate resume
+  const handleResumeChange = (event) => {
+    const selectedFile = event.target.files?.[0]
+
+    setResume(null)
+    setUploadMessage('')
+    setUploadSuccess(false)
+
+    if (!selectedFile) return
+
+    const extension = selectedFile.name
+      .split('.')
+      .pop()
+      .toLowerCase()
+
+    if (!['pdf', 'docx'].includes(extension)) {
+      setUploadMessage('Only PDF and DOCX files are allowed.')
+      event.target.value = ''
+      return
+    }
+
+    if (selectedFile.size > MAX_FILE_SIZE) {
+      setUploadMessage('File size must not exceed 5 MB.')
+      event.target.value = ''
+      return
+    }
+
+    if (selectedFile.size === 0) {
+      setUploadMessage('The selected file is empty.')
+      event.target.value = ''
+      return
+    }
+
+    setResume(selectedFile)
+  }
+
+  // Upload resume using JWT token
+  const handleResumeUpload = async (event) => {
+    event.preventDefault()
+
+    if (!resume || !session?.token) {
+      setUploadMessage('Please select a resume first.')
+      return
+    }
+
+    setUploadBusy(true)
+    setUploadMessage('')
+    setUploadSuccess(false)
+
+    try {
+      const formData = new FormData()
+      formData.append('resume', resume)
+
+      const response = await fetch('/api/uploads/resume', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.token}`
+        },
+        body: formData
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Resume upload failed.')
+      }
+
+      setUploadSuccess(true)
+      setUploadMessage(data.message || 'Resume uploaded successfully!')
+      setResume(null)
+
+      const fileInput = document.getElementById('resume-file')
+      if (fileInput) fileInput.value = ''
+    } catch (error) {
+      setUploadMessage(
+        error.message || 'Unable to upload resume. Please try again.'
+      )
+    } finally {
+      setUploadBusy(false)
     }
   }
 
   const signOut = () => {
     sessionStorage.removeItem(tokenKey)
     sessionStorage.removeItem(userKey)
+
     setSession(null)
-    setForm({ name: '', username: '', email: '', password: '' })
+    setResume(null)
+    setUploadMessage('')
+    setUploadSuccess(false)
+
+    setForm({
+      name: '',
+      username: '',
+      email: '',
+      password: ''
+    })
+
     setMessage('You have signed out.')
   }
 
@@ -76,14 +224,23 @@ function App() {
       <section className="story-panel" aria-label="Career readiness">
         <header className="brand-lockup">
           <span className="brand-mark">C</span>
-          <span>CRAS <span className="brand-divider">/</span> CAREER READINESS</span>
+          <span>
+            CRAS <span className="brand-divider">/</span> CAREER READINESS
+          </span>
         </header>
 
         <div className="story-copy">
           <p className="eyebrow">YOUR NEXT CHAPTER STARTS HERE</p>
-          <h1>Know where you stand.<br /><span>See where you can go.</span></h1>
+
+          <h1>
+            Know where you stand.
+            <br />
+            <span>See where you can go.</span>
+          </h1>
+
           <p className="story-description">
-            One clear view of your strengths, your skill gaps, and the steps that move you forward.
+            One clear view of your strengths, your skill gaps, and the steps
+            that move you forward.
           </p>
         </div>
 
@@ -92,19 +249,31 @@ function App() {
             <span>READINESS SNAPSHOT</span>
             <span className="live-dot">● SAMPLE</span>
           </div>
+
           <div className="visual-score">
-            <div><strong>78</strong><span>/ 100</span></div>
+            <div>
+              <strong>78</strong>
+              <span>/ 100</span>
+            </div>
             <span className="score-label">CAREER READINESS</span>
           </div>
-          <div className="score-track"><span /></div>
+
+          <div className="score-track">
+            <span />
+          </div>
+
           <div className="visual-bottomline">
-            <span><i className="legend-dot teal-dot" /> Skills in motion</span>
+            <span>
+              <i className="legend-dot teal-dot" /> Skills in motion
+            </span>
             <span>+12 this month</span>
           </div>
         </div>
 
         <footer className="story-footer">
-          <span>ASSESS <b>→</b> UNDERSTAND <b>→</b> GROW</span>
+          <span>
+            ASSESS <b>→</b> UNDERSTAND <b>→</b> GROW
+          </span>
           <span>01 / 03</span>
         </footer>
       </section>
@@ -112,16 +281,119 @@ function App() {
       <section className="form-panel">
         {session ? (
           <div className="signed-in" aria-live="polite">
-            <span className="success-icon"><Check size={24} /></span>
+            <span className="success-icon">
+              <Check size={24} />
+            </span>
+
             <p className="eyebrow">AUTHENTICATION COMPLETE</p>
-            <h2>Good to have you,<br />{session.user.name}.</h2>
-            <p className="welcome-copy">You’re signed in as <strong>@{session.user.username}</strong>.</p>
+
+            <h2>
+              Good to have you,
+              <br />
+              {session.user.name}.
+            </h2>
+
+            <p className="welcome-copy">
+              You’re signed in as{' '}
+              <strong>@{session.user.username}</strong>.
+            </p>
+
             <div className="account-row">
-              <span className="account-avatar">{session.user.name?.charAt(0).toUpperCase()}</span>
-              <span><strong>{session.user.name}</strong><small>{session.user.email}</small></span>
-              <ShieldCheck className="verified-icon" size={20} aria-label="Verified session" />
+              <span className="account-avatar">
+                {session.user.name?.charAt(0).toUpperCase()}
+              </span>
+
+              <span>
+                <strong>{session.user.name}</strong>
+                <small>{session.user.email}</small>
+              </span>
+
+              <ShieldCheck
+                className="verified-icon"
+                size={20}
+                aria-label="Verified session"
+              />
             </div>
-            <button className="secondary-button" type="button" onClick={signOut}>
+
+            {/* Resume upload section */}
+            <div className="resume-upload-section">
+              <div className="resume-heading">
+                <FileText size={23} />
+                <div>
+                  <h3>Upload your resume</h3>
+                  <p>Let’s get your career profile started.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleResumeUpload}>
+                <label className="resume-file-label" htmlFor="resume-file">
+                  <Upload size={22} />
+
+                  <span>
+                    {resume ? resume.name : 'Choose your resume'}
+                  </span>
+
+                  <small>PDF or DOCX · Maximum 5 MB</small>
+                </label>
+
+                <input
+                  id="resume-file"
+                  type="file"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={handleResumeChange}
+                  hidden
+                />
+
+                {resume && (
+                  <div className="selected-resume">
+                    <FileText size={18} />
+                    <span>{resume.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResume(null)
+                        setUploadMessage('')
+                        document.getElementById('resume-file').value = ''
+                      }}
+                      aria-label="Remove selected resume"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                )}
+
+                {uploadMessage && (
+                  <p
+                    className={`upload-message ${
+                      uploadSuccess ? 'upload-success' : 'upload-error'
+                    }`}
+                    role="status"
+                  >
+                    {uploadMessage}
+                  </p>
+                )}
+
+                <button
+                  className="resume-upload-button"
+                  type="submit"
+                  disabled={!resume || uploadBusy}
+                >
+                  {uploadBusy
+                    ? 'Uploading...'
+                    : uploadSuccess
+                      ? 'Upload another resume'
+                      : 'Upload Resume'}
+
+                  {!uploadBusy && <ArrowRight size={18} />}
+                </button>
+              </form>
+            </div>
+
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={signOut}
+            >
               <LogOut size={17} /> Sign out
             </button>
           </div>
@@ -129,48 +401,144 @@ function App() {
           <div className="form-content">
             <div className="form-heading">
               <p className="eyebrow">STUDENT PORTAL</p>
-              <h2>{mode === 'login' ? 'Welcome back.' : 'Create your account.'}</h2>
-              <p>{mode === 'login' ? 'Sign in to continue your readiness journey.' : 'Start building your career readiness profile.'}</p>
+
+              <h2>
+                {mode === 'login'
+                  ? 'Welcome back.'
+                  : 'Create your account.'}
+              </h2>
+
+              <p>
+                {mode === 'login'
+                  ? 'Sign in to continue your readiness journey.'
+                  : 'Start building your career readiness profile.'}
+              </p>
             </div>
 
-            <div className="mode-switch" role="tablist" aria-label="Account access">
-              <button className={mode === 'login' ? 'active' : ''} type="button" role="tab" aria-selected={mode === 'login'} onClick={() => { setMode('login'); setMessage('') }}>Sign in</button>
-              <button className={mode === 'register' ? 'active' : ''} type="button" role="tab" aria-selected={mode === 'register'} onClick={() => { setMode('register'); setMessage('') }}>Create account</button>
+            <div
+              className="mode-switch"
+              role="tablist"
+              aria-label="Account access"
+            >
+              <button
+                className={mode === 'login' ? 'active' : ''}
+                type="button"
+                role="tab"
+                aria-selected={mode === 'login'}
+                onClick={() => {
+                  setMode('login')
+                  setMessage('')
+                }}
+              >
+                Sign in
+              </button>
+
+              <button
+                className={mode === 'register' ? 'active' : ''}
+                type="button"
+                role="tab"
+                aria-selected={mode === 'register'}
+                onClick={() => {
+                  setMode('register')
+                  setMessage('')
+                }}
+              >
+                Create account
+              </button>
             </div>
 
             <form className="auth-form" onSubmit={handleSubmit}>
               {mode === 'register' && (
                 <label>
                   Full name
-                  <input autoComplete="name" name="name" value={form.name} onChange={updateField} placeholder="e.g. Asha Kumar" required />
+                  <input
+                    autoComplete="name"
+                    name="name"
+                    value={form.name}
+                    onChange={updateField}
+                    placeholder="e.g. Asha Kumar"
+                    required
+                  />
                 </label>
               )}
+
               <label>
                 Username
-                <input autoComplete="username" name="username" value={form.username} onChange={updateField} placeholder="Your username" minLength={3} maxLength={30} pattern="[A-Za-z0-9_]+" required />
+                <input
+                  autoComplete="username"
+                  name="username"
+                  value={form.username}
+                  onChange={updateField}
+                  placeholder="Your username"
+                  minLength={3}
+                  maxLength={30}
+                  pattern="[A-Za-z0-9_]+"
+                  required
+                />
               </label>
+
               {mode === 'register' && (
                 <label>
                   Email address
-                  <input autoComplete="email" name="email" type="email" value={form.email} onChange={updateField} placeholder="you@example.com" required />
+                  <input
+                    autoComplete="email"
+                    name="email"
+                    type="email"
+                    value={form.email}
+                    onChange={updateField}
+                    placeholder="you@example.com"
+                    required
+                  />
                 </label>
               )}
+
               <label>
                 Password
-                <input autoComplete={mode === 'login' ? 'current-password' : 'new-password'} name="password" type="password" value={form.password} onChange={updateField} placeholder="At least 8 characters" minLength={8} required />
+                <input
+                  autoComplete={
+                    mode === 'login' ? 'current-password' : 'new-password'
+                  }
+                  name="password"
+                  type="password"
+                  value={form.password}
+                  onChange={updateField}
+                  placeholder="At least 8 characters"
+                  minLength={8}
+                  required
+                />
               </label>
 
-              {message && <p className="form-message" role="alert">{message}</p>}
-              <button className="submit-button" type="submit" disabled={busy}>
-                {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
+              {message && (
+                <p className="form-message" role="alert">
+                  {message}
+                </p>
+              )}
+
+              <button
+                className="submit-button"
+                type="submit"
+                disabled={busy}
+              >
+                {busy
+                  ? 'Please wait…'
+                  : mode === 'login'
+                    ? 'Sign in'
+                    : 'Create account'}
+
                 {!busy && <ArrowRight size={18} />}
               </button>
             </form>
 
-            <p className="form-footnote">Your password is securely hashed before it is stored.</p>
+            <p className="form-footnote">
+              Your password is securely hashed before it is stored.
+            </p>
           </div>
         )}
-        <footer className="form-footer"><span>© 2026 CRAS</span><span>CAREER READINESS, MADE CLEAR.</span></footer>
+
+        <footer className="form-footer">
+          <span>© 2026 CRAS</span>
+          <span>CAREER READINESS, MADE CLEAR.</span>
+        </footer>
       </section>
     </main>
   )
